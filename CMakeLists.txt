@@ -14,8 +14,7 @@ add_library(mean3_core STATIC
 target_include_directories(mean3_core PUBLIC src)
 
 add_executable(mean3_demo
-    src/main.cpp
-    src/console_report.cpp)
+    src/main.cpp)
 target_link_libraries(mean3_demo PRIVATE mean3_core)
 
 add_executable(mean3_tests tests/tests.cpp)
