@@ -118,21 +118,45 @@ std::string padRight(std::string text, std::size_t width)
     return text;
 }
 
+std::size_t utf8SymbolLength(std::string_view text)
+{
+    const auto lead = static_cast<unsigned char>(text.front());
+    std::size_t length = 0;
+    if (lead < 0x80)
+        length = 1;
+    else if (lead >= 0xC2 && lead <= 0xDF)
+        length = 2;
+    else if (lead >= 0xE0 && lead <= 0xEF)
+        length = 3;
+    else if (lead >= 0xF0 && lead <= 0xF4)
+        length = 4;
+
+    if (length == 0 || length > text.size())
+        return 0;
+    for (std::size_t i = 1; i < length; ++i)
+        if (!isUtf8Continuation(text[i]))
+            return 0;
+    return length;
+}
+
 std::string printableToken(std::string_view token)
 {
-    const bool tooLong = displayWidth(token) > kTokenWidth;
     std::string shown;
     std::size_t symbols = 0;
-    for (char byte : token)
+    std::size_t ellipsisAt = 0;
+    while (!token.empty())
     {
-        if (!isUtf8Continuation(byte))
-        {
-            if (tooLong && symbols == kTokenWidth - 1)
-                return shown + "…";
-            ++symbols;
-        }
-        const auto code = static_cast<unsigned char>(byte);
-        shown += (code < 0x20 || code == 0x7F) ? '?' : byte;
+        if (symbols == kTokenWidth - 1)
+            ellipsisAt = shown.size();
+        if (symbols == kTokenWidth)
+            return shown.substr(0, ellipsisAt) + "…";
+
+        const std::size_t length = utf8SymbolLength(token);
+        const auto code = static_cast<unsigned char>(token.front());
+        const bool printable = length > 0 && code >= 0x20 && code != 0x7F;
+        shown += printable ? token.substr(0, length) : std::string_view("?");
+        token.remove_prefix(printable ? length : 1);
+        ++symbols;
     }
     return shown;
 }

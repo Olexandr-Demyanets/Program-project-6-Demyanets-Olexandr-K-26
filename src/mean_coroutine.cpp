@@ -75,10 +75,12 @@ std::optional<double> LastThreeWindow::mean() const
     if (std::isfinite(sum))
         return sum / divisor;
 
+    constexpr double overflowSafeScale = 4.0;
+
     double scaledSum = 0.0;
     for (double value : values_)
-        scaledSum += value / divisor;
-    return scaledSum;
+        scaledSum += value / overflowSafeScale;
+    return scaledSum / divisor * overflowSafeScale;
 }
 
 std::vector<double> LastThreeWindow::contents() const

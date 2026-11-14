@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <stdexcept>
 #include <string_view>
@@ -94,6 +95,17 @@ void testWindow()
     for (int i = 0; i < 3; ++i)
         huge.push(1.7e308);
     CHECK(huge.mean() && nearlyEqual(*huge.mean(), 1.7e308));
+
+    const double largest = std::numeric_limits<double>::max();
+    LastThreeWindow extreme;
+    for (int i = 0; i < 3; ++i)
+        extreme.push(largest);
+    CHECK(extreme.mean() == largest);
+    extreme.push(-largest);
+    CHECK(extreme.mean() && nearlyEqual(*extreme.mean(), largest / 3.0));
+    extreme.push(-largest);
+    extreme.push(-largest);
+    CHECK(extreme.mean() == -largest);
 }
 
 void testTokenReader()
@@ -132,6 +144,22 @@ const MeanUpdate* resumeToUpdate(MeanCoroutine& coroutine)
     return std::get_if<MeanUpdate>(&coroutine.current());
 }
 
+ResumeResult resumeWhenAllowed(MeanCoroutine& coroutine)
+{
+    for (;;)
+    {
+        const ResumeResult result = coroutine.resume();
+        if (result.status != ResumeStatus::Refused)
+            return result;
+        std::this_thread::sleep_for(result.remaining);
+    }
+}
+
+bool cooldownPassedSince(Clock::time_point zeroReceivedAt)
+{
+    return Clock::now() - zeroReceivedAt >= kResumeCooldown;
+}
+
 void testCoroutine()
 {
     std::istringstream input("2 4 abc\n0 6 0");
@@ -150,6 +178,7 @@ void testCoroutine()
     const auto* pause = std::get_if<ZeroPause>(&coroutine.current());
     CHECK(pause && pause->line == 2 && !pause->mean);
     CHECK(pause && pause->resumeNotBefore - pause->receivedAt == kResumeCooldown);
+    const Clock::time_point firstZeroAt = pause ? pause->receivedAt : Clock::now();
 
     const ResumeResult refused = coroutine.resume();
     CHECK(refused.status == ResumeStatus::Refused);
@@ -157,16 +186,18 @@ void testCoroutine()
     CHECK(std::holds_alternative<ZeroPause>(coroutine.current()));
     CHECK(!coroutine.done());
 
-    std::this_thread::sleep_until(pause->resumeNotBefore);
-    update = resumeToUpdate(coroutine);
+    CHECK(resumeWhenAllowed(coroutine).status == ResumeStatus::Produced);
+    CHECK(cooldownPassedSince(firstZeroAt));
+    update = std::get_if<MeanUpdate>(&coroutine.current());
     CHECK(update && update->number == 6.0 && update->mean == 4.0);
 
     CHECK(coroutine.resume().status == ResumeStatus::Produced);
     pause = std::get_if<ZeroPause>(&coroutine.current());
     CHECK(pause && pause->mean == 4.0);
+    const Clock::time_point secondZeroAt = pause ? pause->receivedAt : Clock::now();
     CHECK(coroutine.resume().status == ResumeStatus::Refused);
-    std::this_thread::sleep_until(pause->resumeNotBefore);
-    CHECK(coroutine.resume().status == ResumeStatus::Finished);
+    CHECK(resumeWhenAllowed(coroutine).status == ResumeStatus::Finished);
+    CHECK(cooldownPassedSince(secondZeroAt));
     CHECK(coroutine.done());
     CHECK(coroutine.resume().status == ResumeStatus::Finished);
 }
